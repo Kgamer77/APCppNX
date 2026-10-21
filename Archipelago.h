@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <set>
 #include <functional>
+#include "Archipelago/ArchipelagoSocket.h"
 
 void AP_Init(const char*, const char*, const char*, const char*);
 void AP_Init(const char*);
@@ -76,7 +77,7 @@ void AP_RegisterSlotDataRawCallback(std::string, std::function<void(std::string)
 // Send LocationScouts packet
 void AP_SendLocationScouts(std::set<int64_t> const& locations, int create_as_hint);
 // Receive Function for LocationInfo
-void AP_SetLocationInfoCallback(std::function<void(std::vector<AP_NetworkItem>)> f_locinfrecv);
+void AP_SetLocationInfoCallback(std::function<void(vector<AP_NetworkItem>)> f_locinfrecv);
 
 /* Game Management Functions */
 
@@ -109,7 +110,6 @@ struct AP_Message {
 struct AP_ItemSendMessage : AP_Message {
     std::string item;
     std::string recvPlayer;
-    std::string sendPlayer;
 };
 
 struct AP_ItemRecvMessage : AP_Message {
@@ -159,7 +159,7 @@ enum struct AP_ConnectionStatus {
 
 struct AP_RoomInfo {
     AP_NetworkVersion version;
-    std::vector<std::string> tags;
+    vector<std::string> tags;
     bool password_required;
     std::map<std::string, int> permissions;
     int hint_cost;
@@ -176,7 +176,7 @@ int AP_GetRoomInfo(AP_RoomInfo*);
 AP_ConnectionStatus AP_GetConnectionStatus();
 std::uint64_t AP_GetUUID();
 int AP_GetPlayerID();
-void AP_UpdateTags(std::vector<std::string> const& tags);
+void AP_UpdateTags(vector<std::string> const& tags);
 
 /* Serverside Data Types */
 
@@ -203,7 +203,7 @@ struct AP_DataStorageOperation {
 struct AP_SetServerDataRequest {
     AP_RequestStatus status;
     std::string key;
-    std::vector<AP_DataStorageOperation> operations;
+    vector<AP_DataStorageOperation> operations;
     void* default_value = nullptr;
     AP_DataType type;
     bool want_reply;
@@ -216,9 +216,9 @@ struct AP_SetReply {
 };
 
 struct AP_Bounce {
-    std::vector<std::string>* games = nullptr; // Can be nullptr or empty, but must be set to either
-    std::vector<int64_t>* slots = nullptr; // Can be nullptr or empty, but must be set to either
-    std::vector<std::string>* tags  = nullptr; // Can be nullptr or empty, but must be set to either
+    vector<const char*>* games = nullptr; // Can be nullptr or empty, but must be set to either
+    vector<int>* slots = nullptr; // Can be nullptr or empty, but must be set to either
+    vector<const char*>* tags  = nullptr; // Can be nullptr or empty, but must be set to either
     std::string data; // Valid JSON Data. Can also be primitive (Numbers or literals)
 };
 
@@ -266,7 +266,7 @@ void AP_RegisterBouncedCallback(std::function<void(AP_Bounce)> f_bounced);
 struct AP_GiftBoxProperties {
     bool IsOpen = false;
     bool AcceptsAnyGift = false;
-    std::vector<std::string> DesiredTraits;
+    vector<std::string> DesiredTraits;
 };
 
 struct AP_GiftTrait {
@@ -280,7 +280,7 @@ struct AP_Gift {
     std::string ItemName;
     uint64_t Amount;
     uint64_t ItemValue;
-    std::vector<AP_GiftTrait> Traits;
+    vector<AP_GiftTrait> Traits;
     std::string Sender;
     std::string Receiver;
     int SenderTeam; // Always 0 for now
@@ -305,7 +305,7 @@ AP_RequestStatus AP_SetGiftBoxProperties(AP_GiftBoxProperties props);
 std::map<std::pair<int,std::string>,AP_GiftBoxProperties> AP_QueryGiftBoxes();
 
 // Get currently available Gifts in own gift box
-std::vector<AP_Gift> AP_CheckGifts();
+vector<AP_Gift> AP_CheckGifts();
 
 // Send a Gift. DO *NOT* SEND REFUNDS HERE! Use AP_RejectGift for refunds
 // IDs and Sender Info are set by the library. The values set will be ignored
@@ -326,3 +326,21 @@ void AP_UseGiftAutoReject(bool enable);
 
 // Enabled the gifting api functions, should be configured before AP_Start get called, defaults to off
 void AP_SetGiftingSupported(bool);
+
+// Macros for bulding cJSON objects
+#define ADD_STRING(root, name, value) \
+cJSON_AddItemToObject(root, name, cJSON_CreateString(value));
+#define ADD_NUMBER(root, name, value) \
+cJSON_AddItemToObject(root, name, cJSON_CreateNumber(value));
+#define ADD_ARRAY(root, name, type, values, count) \
+cJSON_AddItemToObject(root, name, cJSON_Create##type##Array(values, count));
+#define ADD_OBJECT(root, name, value) \
+cJSON_AddItemToObject(root, name, value);
+#define ADD_BOOL(root, name, value) \
+cJSON_AddBoolToObject(root, name, value);
+#define ADD_RAW(root, name, value) \
+cJSON_AddRawToObject(root, name, value);
+#define APPEND_STRING(array, value) \
+cJSON_AddItemToArray(array, cJSON_CreateString(value));
+#define APPEND_NUMBER(array, value) \
+cJSON_AddItemToArray(array, cJSON_CreateNumber(value));

@@ -1,18 +1,21 @@
 #include "Archipelago.h"
-#include <json/json.h>
-#include <json/value.h>
-#include <json/writer.h>
+// #include <json/json.h>
+// #include <json/value.h>
+// #include <json/writer.h>
+#include <cJSON.h>
 #include <random>
 #include <set>
 #include <sstream>
 #include <string>
+#include <format>
 #include <sys/types.h>
 #include <utility>
 #include <vector>
 #include <mutex>
+#include "Archipelago/ArchipelagoSocket.h"
 
-extern Json::FastWriter writer;
-extern Json::Reader reader;
+// extern Json::FastWriter writer;
+// extern Json::Reader reader;
 extern std::mt19937_64 rando;
 extern int ap_player_team;
 extern std::set<int> teams_set;
@@ -24,12 +27,12 @@ extern std::function<void(std::string)> logfunc;
 // Stuff that is only used for Gifting
 std::map<std::pair<int,std::string>,AP_GiftBoxProperties> map_players_to_giftbox;
 std::mutex map_players_to_giftbox_mutex;
-std::vector<AP_Gift> cur_gifts_available;
+vector<AP_Gift> cur_gifts_available;
 std::mutex cur_gifts_available_mutex;
 
 // PRIV Func Declarations Start
 AP_RequestStatus sendGiftInternal(const AP_Gift& gift);
-AP_RequestStatus rejectGiftsInternal(std::vector<AP_Gift>& giftsToReject);
+AP_RequestStatus rejectGiftsInternal(vector<AP_Gift>& giftsToReject);
 AP_NetworkPlayer getPlayer(int team, int slot);
 AP_NetworkPlayer getPlayer(int team, std::string name);
 AP_GiftBoxProperties getLocalGiftBoxProperties();
@@ -44,11 +47,12 @@ AP_RequestStatus AP_SetGiftBoxProperties(AP_GiftBoxProperties props) {
         logfunc("AP: Gifting isn't enabled yet, please call AP_SetGiftingSupported(true) first");
         return AP_RequestStatus::Error;
     }
+    cJSON *empty = cJSON_CreateObject();
 
     // Create Local Box if needed
     AP_SetServerDataRequest req_local_box;
     req_local_box.key = AP_PLAYER_GIFTBOX_KEY;
-    std::string LocalGiftBoxDef_s = writer.write(Json::objectValue);
+    std::string LocalGiftBoxDef_s = cJSON_Print(empty);
     req_local_box.default_value = &LocalGiftBoxDef_s;
     std::string zero = "0";
     req_local_box.operations = {{"default", &zero}};
@@ -57,25 +61,29 @@ AP_RequestStatus AP_SetGiftBoxProperties(AP_GiftBoxProperties props) {
     AP_BulkSetServerData(&req_local_box);
 
     // Set Properties
-    Json::Value GlobalGiftBox = Json::objectValue;
-    GlobalGiftBox[std::to_string(AP_GetPlayerID())]["is_open"] = props.IsOpen;
-    GlobalGiftBox[std::to_string(AP_GetPlayerID())]["accepts_any_gift"] = props.AcceptsAnyGift;
-    GlobalGiftBox[std::to_string(AP_GetPlayerID())]["desired_traits"] = Json::arrayValue;
+    cJSON *GlobalGiftBox = cJSON_CreateObject();
+    cJSON *playerGiftBox = cJSON_AddObjectToObject(GlobalGiftBox, std::to_string(AP_GetPlayerID()).c_str());
+    ADD_BOOL(playerGiftBox, "is_open", props.IsOpen)
+    ADD_BOOL(playerGiftBox, "accepts_any_gift", props.AcceptsAnyGift)
+    cJSON *desiredTraits = cJSON_AddArrayToObject(playerGiftBox, "desired_traits");
+
     for (std::string trait_s : props.DesiredTraits)
-        GlobalGiftBox[std::to_string(AP_GetPlayerID())]["desired_traits"].append(trait_s);
-    GlobalGiftBox[std::to_string(AP_GetPlayerID())]["minimum_gift_data_version"] = CURRENT_GIFT_PROTOCOL_VERSION;
-    GlobalGiftBox[std::to_string(AP_GetPlayerID())]["maximum_gift_data_version"] = CURRENT_GIFT_PROTOCOL_VERSION;
+        APPEND_STRING(desiredTraits, trait_s.c_str())
+
+    ADD_NUMBER(playerGiftBox, "minimum_gift_data_version", CURRENT_GIFT_PROTOCOL_VERSION)
+    ADD_NUMBER(playerGiftBox, "maximum_gift_data_version", CURRENT_GIFT_PROTOCOL_VERSION)
 
     // Update entry in MotherBox
     AP_SetServerDataRequest req_global_box;
     req_global_box.key = "GiftBoxes;" + std::to_string(ap_player_team);
-    std::string GlobalGiftBox_s = writer.write(GlobalGiftBox);
+    std::string GlobalGiftBox_s = cJSON_Print(GlobalGiftBox);
     std::string DefBoxGlobal_s = "{}";
     req_global_box.operations = {{"update", &GlobalGiftBox_s}};
     req_global_box.default_value = &DefBoxGlobal_s;
     req_global_box.type = AP_DataType::Raw;
     req_global_box.want_reply = false;
     AP_BulkSetServerData(&req_global_box);
+    cJSON_Delete(GlobalGiftBox);
 
     // Set Values
     AP_CommitServerData();
@@ -91,7 +99,7 @@ std::map<std::pair<int,std::string>,AP_GiftBoxProperties> AP_QueryGiftBoxes() {
 }
 
 // Get currently available Gifts in own gift box
-std::vector<AP_Gift> AP_CheckGifts() {
+vector<AP_Gift> AP_CheckGifts() {
     std::scoped_lock lock(cur_gifts_available_mutex);
     return cur_gifts_available;
 }
@@ -131,9 +139,9 @@ AP_RequestStatus AP_AcceptGift(std::set<std::string> ids) {
     req.key = AP_PLAYER_GIFTBOX_KEY;
     req.type = AP_DataType::Raw;
     req.want_reply = true;
-    req.operations = std::vector<AP_DataStorageOperation>();
+    req.operations = vector<AP_DataStorageOperation>();
 
-    std::vector<std::string> id_strings;
+    vector<std::string> id_strings;
     for (std::string id : ids) 
         id_strings.push_back("\"" + id + "\"");
     for (size_t i=0; i < id_strings.size(); i++)
@@ -153,8 +161,8 @@ AP_RequestStatus AP_RejectGift(std::set<std::string> ids) {
         return AP_RequestStatus::Error;
     }
 
-    std::vector<AP_Gift> gifts;
-    std::vector<AP_Gift> availableGiftsCopy = AP_CheckGifts();
+    vector<AP_Gift> gifts;
+    vector<AP_Gift> availableGiftsCopy = AP_CheckGifts();
 
     for (std::string id : ids) {
         bool found = false;
@@ -174,7 +182,7 @@ AP_RequestStatus AP_RejectGift(std::set<std::string> ids) {
     return rejectGiftsInternal(gifts);
 }
 
-AP_RequestStatus rejectGiftsInternal(std::vector<AP_Gift>& giftsToReject){
+AP_RequestStatus rejectGiftsInternal(vector<AP_Gift>& giftsToReject){
     std::set<std::string> giftIds;
 
     for (const AP_Gift& gift : giftsToReject){
@@ -229,57 +237,62 @@ bool hasOpenGiftBox(int team, std::string player){
 
 void handleGiftAPISetReply(const AP_SetReply& reply) {
     if (reply.key == AP_PLAYER_GIFTBOX_KEY) {
-        Json::Value local_giftbox;
-        reader.parse(*(std::string*)reply.value, local_giftbox);
+        // Appears to be an array of gifts with each object being named its id
+        cJSON *local_giftbox = cJSON_ParseWithLength(((std::string*)reply.value)->c_str(), ((std::string*)reply.value)->size());
+        cJSON *giftId = NULL;
         std::map<std::string,AP_Gift> gifts;
         std::set<std::string> invalid_gifts;
-        for (std::string gift_id : local_giftbox.getMemberNames()) {
+        cJSON_ArrayForEach(giftId, local_giftbox) {
             AP_Gift gift;
-            gift.ID = gift_id;
+            gift.ID = giftId->valuestring;
+            /// Finish migrating...
 
-            if (!local_giftbox[gift_id].isObject()) {
-                invalid_gifts.insert(gift_id);
+
+            if (!cJSON_IsObject(giftId)) {
+                invalid_gifts.insert(giftId->string);
                 continue;
             }
-            int sender_team = local_giftbox[gift_id].get("sender_team", -1).asInt();
-            int sender_slot = local_giftbox[gift_id].get("sender_slot", -1).asInt();
-            int receiver_team = local_giftbox[gift_id].get("receiver_team", -1).asInt();
-            int receiver_slot = local_giftbox[gift_id].get("receiver_slot", -1).asInt();
+            int sender_team = cJSON_GetObjectItem(giftId,"sender_team")->valueint;
+            int sender_slot = cJSON_GetObjectItem(giftId,"sender_slot")->valueint;
+            int receiver_team = cJSON_GetObjectItem(giftId,"receiver_team")->valueint;
+            int receiver_slot = cJSON_GetObjectItem(giftId,"receiver_slot")->valueint;
             if (sender_team == -1 || sender_slot == -1 || receiver_team == -1 || receiver_slot == -1) {
-                invalid_gifts.insert(gift_id);
+                invalid_gifts.insert(giftId->string);
                 continue;
             }
-            gift.ItemName = local_giftbox[gift_id].get("item_name", "Unknown").asString();
-            gift.Amount = local_giftbox[gift_id].get("amount", 1).asUInt();
-            gift.ItemValue = local_giftbox[gift_id].get("item_value", 0).asUInt64(); //technically this value is unbounded so even uint64 isnt enough
+            gift.ItemName = cJSON_GetObjectItem(giftId,"item_name")->valuestring;
+            gift.Amount = cJSON_GetObjectItem(giftId,"amount")->valueint; // maybe cast to uint
+            gift.ItemValue = cJSON_GetObjectItem(giftId,"item_value")->valueint; //technically this value is unbounded so even uint64 isnt enough
             gift.Sender = getPlayer(sender_team, sender_slot).name;
             gift.Receiver = getPlayer(receiver_team, receiver_slot).name;
             gift.SenderTeam = sender_team;
             gift.ReceiverTeam = receiver_team;
-            gift.IsRefund = local_giftbox[gift_id].get("is_refund", false).asBool();
+            gift.IsRefund = cJSON_IsTrue(cJSON_GetObjectItem(giftId,"is_refund"));
 
-            for (Json::Value trait_v : local_giftbox[gift_id]["traits"]) {
-                if (!trait_v.isObject()) {
-                    invalid_gifts.insert(gift_id);
+            cJSON *trait = NULL;
+            cJSON_ArrayForEach(trait, cJSON_GetObjectItem(giftId, "traits")) {
+                if (!cJSON_IsObject(trait)) {
+                    invalid_gifts.insert(giftId->string);
                     break;
                 }
-                AP_GiftTrait trait;
-                trait.Trait = trait_v.get("trait", "Unknown").asString();
-                trait.Quality = trait_v.get("quality", 1.).asDouble();
-                trait.Duration = trait_v.get("duration", 1.).asDouble();
-                gift.Traits.push_back(trait);
+                AP_GiftTrait apTrait;
+                apTrait.Trait = cJSON_GetObjectItem(trait, "trait")->valuestring;
+                apTrait.Quality = cJSON_GetObjectItem(trait, "trait")->valuedouble;
+                apTrait.Duration = cJSON_GetObjectItem(trait, "trait")->valuedouble;
+                gift.Traits.push_back(apTrait);
             }
 
-            if (!invalid_gifts.count(gift_id))
-                gifts[gift_id] = gift;
+            if (!invalid_gifts.count(giftId->string))
+                gifts[giftId->string] = gift;
         }
+
         if (!invalid_gifts.empty())
             AP_AcceptGift(invalid_gifts);
 
         // Perform auto-reject if giftbox closed, or traits do not match
         if (gifting_autoReject) {
             AP_GiftBoxProperties local_box_props = getLocalGiftBoxProperties();
-            std::vector<AP_Gift> giftsToReject;
+            vector<AP_Gift> giftsToReject;
             if (!local_box_props.IsOpen) {
                 for (const std::pair<std::string, AP_Gift>& gift : gifts)
                     giftsToReject.push_back(gift.second);
@@ -312,36 +325,38 @@ void handleGiftAPISetReply(const AP_SetReply& reply) {
         for (const std::pair<std::string, AP_Gift>& gift : gifts) {
             cur_gifts_available.push_back(gift.second);
         }
+        cJSON_Delete(local_giftbox);
     } else if (reply.key.rfind("GiftBoxes;", 0) == 0) {
         int team = std::stoi(reply.key.substr(10)); //10 = length of "GiftBoxes;"
-        Json::Value json_data;
-        reader.parse(*(std::string*)reply.value, json_data);
+        cJSON *json_data = cJSON_ParseWithLength((*(std::string*)reply.value).c_str(), (*(std::string*)reply.value).size());
 
         std::scoped_lock lock(map_players_to_giftbox_mutex);
         map_players_to_giftbox.clear();
 
-        for(std::string motherbox_slot : json_data.getMemberNames()) {
-            int slot = std::stoi(motherbox_slot.c_str());
-            Json::Value player_global_props = json_data[motherbox_slot];
+        cJSON *motherbox = NULL;
+        cJSON_ArrayForEach(motherbox, json_data) {
+            int slot = std::stoi(motherbox->string);
+            cJSON *player_global_props = motherbox->child;
 
-            int min_supported_version = player_global_props.get("minimum_gift_data_version",CURRENT_GIFT_PROTOCOL_VERSION).asInt();
-            int max_supported_version = player_global_props.get("maximum_gift_data_version",CURRENT_GIFT_PROTOCOL_VERSION).asInt();
+            int min_supported_version = cJSON_GetObjectItem(player_global_props, "minimum_gift_data_version")->valueint;
+            int max_supported_version = cJSON_GetObjectItem(player_global_props, "maximum_gift_data_version")->valueint;
 
             if (max_supported_version < CURRENT_GIFT_PROTOCOL_VERSION || min_supported_version > CURRENT_GIFT_PROTOCOL_VERSION)
                 continue; //we cant send gifts to clients incompatiable with our version
 
-            std::vector<std::string> DesiredTraits;
-            for (unsigned int i = 0; i < player_global_props["desired_traits"].size(); i++) {
-                DesiredTraits.push_back(player_global_props["desired_traits"][i].asString());
+            vector<std::string> DesiredTraits;
+            for (unsigned int i = 0; i < cJSON_GetArraySize(cJSON_GetObjectItem(player_global_props, "desired_traits")); i++) {
+                DesiredTraits.push_back(cJSON_GetArrayItem(cJSON_GetObjectItem(player_global_props, "desired_traits"), i)->valuestring);
             }
 
             AP_GiftBoxProperties properties;
-            properties.IsOpen = player_global_props.get("is_open",false).asBool();
-            properties.AcceptsAnyGift = player_global_props.get("accepts_any_gift",false).asBool();
+            properties.IsOpen = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "is_open"));
+            properties.AcceptsAnyGift = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "accepts_any_gift"));
             properties.DesiredTraits = DesiredTraits;
 
             map_players_to_giftbox[{team, getPlayer(team, slot).name}] = properties;
         }
+        cJSON_Delete(json_data);
     }
 }
 
@@ -358,42 +373,47 @@ AP_RequestStatus sendGiftInternal(const AP_Gift& gift) {
     else
         giftbox_key += std::to_string(gift.SenderTeam) + ";" + std::to_string(SenderPlayer.slot);
 
-    Json::Value giftVal;
+    cJSON *giftVal = cJSON_CreateObject();
     if (gift.IsRefund) {
-        giftVal["id"] = gift.ID;
+        ADD_STRING(giftVal, "id", gift.ID.c_str())
     } else {
         uint64_t random1 = rando();
         uint64_t random2 = rando();
-        std::ostringstream id;
-        id << std::hex << random1 << random2;
-        giftVal["id"] = id.str();
+
+        std::string id = "";
+        id += std::to_string(random1);
+        id += std::to_string(random2);
+        ADD_STRING(giftVal, "id", id.c_str())
     }
-    giftVal["item_name"] = gift.ItemName;
-    giftVal["amount"] = gift.Amount;
-    if (gift.ItemValue > 0) giftVal["item_value"] = gift.ItemValue;
-    giftVal["traits"] = Json::arrayValue;
+    ADD_STRING(giftVal, "item_name", gift.ItemName.c_str())
+    ADD_NUMBER(giftVal, "amount", gift.Amount)
+    if (gift.ItemValue > 0) ADD_NUMBER(giftVal, "item_value", gift.ItemValue);
+    cJSON *traitsArr = cJSON_AddArrayToObject(giftVal, "traits");
     for (const AP_GiftTrait& trait : gift.Traits) {
-        Json::Value trait_v;
-        trait_v["trait"] = trait.Trait;
-        if (trait.Quality != 1.) trait_v["quality"] = trait.Quality;
-        if (trait.Duration != 1.) trait_v["duration"] = trait.Duration;
-        giftVal["traits"].append(trait_v);
+        cJSON *trait_v = cJSON_CreateObject();
+        ADD_STRING(trait_v, "trait", trait.Trait.c_str())
+        if (trait.Quality != 1.) ADD_NUMBER(trait_v, "quality", trait.Quality);
+        if (trait.Duration != 1.) ADD_NUMBER(trait_v, "duration", trait.Duration);
+        cJSON_AddItemToArray(traitsArr, trait_v);
     }
-    giftVal["sender_slot"] = SenderPlayer.slot;
-    giftVal["receiver_slot"] = ReceiverPlayer.slot;
-    giftVal["sender_team"] = gift.SenderTeam;
-    giftVal["receiver_team"] = gift.ReceiverTeam;
-    giftVal["is_refund"] = gift.IsRefund;
-    Json::Value player_box_update;
-    player_box_update[giftVal["id"].asString()] = giftVal;
-    std::string gift_s = writer.write(player_box_update);
+    ADD_NUMBER(giftVal, "sender_slot", SenderPlayer.slot)
+    ADD_NUMBER(giftVal, "receiver_slot", ReceiverPlayer.slot)
+    ADD_NUMBER(giftVal, "sender_team", gift.SenderTeam)
+    ADD_NUMBER(giftVal, "receiver_team", gift.ReceiverTeam)
+    ADD_BOOL(giftVal, "is_refund", gift.IsRefund)
+
+    cJSON *player_box_update = cJSON_CreateObject();
+    ADD_OBJECT(player_box_update, cJSON_GetObjectItem(giftVal, "id")->valuestring, giftVal)
+    std::string gift_s = cJSON_Print(player_box_update);
+    cJSON_Delete(player_box_update);
 
     AP_SetServerDataRequest req;
     req.key = giftbox_key;
     req.type = AP_DataType::Raw;
     req.want_reply = true;
-    Json::Value defVal = Json::objectValue;
-    std::string defVal_s = writer.write(defVal);
+    cJSON *defVal = cJSON_CreateObject();
+    std::string defVal_s = cJSON_Print(defVal);
+    cJSON_Delete(defVal);
     req.default_value = &defVal_s;
 
     req.operations = {
