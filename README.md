@@ -1,4 +1,4 @@
-# APCpp
+# APCppNX
 C++ Library for Clients interfacing with the [Archipelago Multi-Game Randomizer](https://archipelago.gg)
 
 # Usage
