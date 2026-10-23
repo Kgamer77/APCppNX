@@ -18,7 +18,7 @@
 // extern Json::Reader reader;
 extern std::mt19937_64 rando;
 extern int ap_player_team;
-extern std::set<int> teams_set;
+extern set<int> teams_set;
 extern bool gifting_supported;
 extern bool gifting_autoReject;
 
@@ -124,9 +124,9 @@ AP_RequestStatus AP_SendGift(AP_Gift gift) {
 }
 
 AP_RequestStatus AP_AcceptGift(std::string id) {
-    return AP_AcceptGift(std::set<std::string>{ id });
+    return AP_AcceptGift(set<std::string>{ id });
 }
-AP_RequestStatus AP_AcceptGift(std::set<std::string> ids) {
+AP_RequestStatus AP_AcceptGift(set<std::string> ids) {
     if (!gifting_supported){
         logfunc("AP: Gifting isn't enabled yet, please call AP_SetGiftingSupported(true) first");
         return AP_RequestStatus::Error;
@@ -153,9 +153,9 @@ AP_RequestStatus AP_AcceptGift(std::set<std::string> ids) {
 }
 
 AP_RequestStatus AP_RejectGift(std::string id) {
-    return AP_RejectGift(std::set<std::string>{ id });
+    return AP_RejectGift(set<std::string>{ id });
 }
-AP_RequestStatus AP_RejectGift(std::set<std::string> ids) {
+AP_RequestStatus AP_RejectGift(set<std::string> ids) {
     if (!gifting_supported){
         logfunc("AP: Gifting isn't enabled yet, please call AP_SetGiftingSupported(true) first");
         return AP_RequestStatus::Error;
@@ -183,7 +183,7 @@ AP_RequestStatus AP_RejectGift(std::set<std::string> ids) {
 }
 
 AP_RequestStatus rejectGiftsInternal(vector<AP_Gift>& giftsToReject){
-    std::set<std::string> giftIds;
+    set<std::string> giftIds;
 
     for (const AP_Gift& gift : giftsToReject){
         giftIds.insert(gift.ID);
@@ -241,7 +241,7 @@ void handleGiftAPISetReply(const AP_SetReply& reply) {
         cJSON *local_giftbox = cJSON_ParseWithLength(((std::string*)reply.value)->c_str(), ((std::string*)reply.value)->size());
         cJSON *giftId = NULL;
         std::map<std::string,AP_Gift> gifts;
-        std::set<std::string> invalid_gifts;
+        set<std::string> invalid_gifts;
         cJSON_ArrayForEach(giftId, local_giftbox) {
             AP_Gift gift;
             gift.ID = giftId->valuestring;
@@ -297,7 +297,7 @@ void handleGiftAPISetReply(const AP_SetReply& reply) {
                 for (const std::pair<std::string, AP_Gift>& gift : gifts)
                     giftsToReject.push_back(gift.second);
             } else if (!local_box_props.AcceptsAnyGift) {
-                std::set<std::string> desired_traits(local_box_props.DesiredTraits.begin(), local_box_props.DesiredTraits.end());
+                set<std::string> desired_traits(local_box_props.DesiredTraits.begin(), local_box_props.DesiredTraits.end());
                 for (const std::pair<std::string, AP_Gift>& gift : gifts) {
                     bool found = false;
                     for (const AP_GiftTrait& item_trait : gift.second.Traits) {

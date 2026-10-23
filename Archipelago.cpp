@@ -102,7 +102,7 @@ std::map<std::pair<std::string,int64_t>, std::string> map_location_id_name;
 std::map<std::pair<std::string,int64_t>, std::string> map_item_id_name;
 
 // Data Sets
-std::set<int> teams_set;
+set<int> teams_set;
 
 // Callback function pointers
 std::function<void()> resetItemValues = nullptr;
@@ -143,7 +143,7 @@ std::map<std::string, std::function<void(std::map<int,int>)>> map_slotdata_callb
 
 // Datapackage Stuff
 std::filesystem::path datapkg_cache_dir = "sd:/SMO-Archipelago/Multi-Data/.datapkg-cache/";
-std::set<std::string> datapkg_outdated_games;
+set<std::string> datapkg_outdated_games;
 
 WebSocketClient *websocket;
 
@@ -441,9 +441,9 @@ void AP_SetClientVersion(AP_NetworkVersion* version) {
 }
 
 void AP_SendItem(int64_t idx) {
-    AP_SendItem(std::set<int64_t>{ idx });
+    AP_SendItem(set<int64_t>{ idx });
 }
-void AP_SendItem(std::set<int64_t> const& locations) {
+void AP_SendItem(set<int64_t> const& locations) {
     for (int64_t idx : locations) {
         logfunc("AP: Checked '" + getLocationName(ap_game, idx) + "'.");
     }
@@ -461,7 +461,7 @@ void AP_SendItem(std::set<int64_t> const& locations) {
         APSend(cJSON_Print(req_t));
         cJSON_Delete(req_t);
     } else {
-        std::set<int64_t> new_locations;
+        set<int64_t> new_locations;
         cJSON *checkedLocations = cJSON_GetObjectItem(sp_save_root, "checked_locations");
         cJSON *element = NULL;
         for (int64_t idx : locations) {
@@ -511,7 +511,7 @@ void AP_SendItem(std::set<int64_t> const& locations) {
     }
 }
 
-void AP_SendLocationScouts(std::set<int64_t> const& locations, int create_as_hint) {
+void AP_SendLocationScouts(set<int64_t> const& locations, int create_as_hint) {
     if (multiworld) {
         cJSON *req_t = cJSON_CreateArray();
         cJSON *locationScouts = cJSON_CreateObject();

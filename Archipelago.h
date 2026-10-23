@@ -1,14 +1,13 @@
 #pragma once
 
 #include <string>
-#include <vector>
 #include <map>
 #include <cstdint>
-#include <set>
+
 #include <functional>
 #include "Archipelago/ArchipelagoSocket.h"
 
-void AP_Init(const char*, const char*, const char*, const char*);
+void AP_Init(const char*, u16 port, const char*, const char*, const char*);
 void AP_Init(const char*);
 bool AP_IsInit();
 
@@ -75,7 +74,7 @@ void AP_RegisterSlotDataMapIntIntCallback(std::string, std::function<void(std::m
 void AP_RegisterSlotDataRawCallback(std::string, std::function<void(std::string)> f_slotdata);
 
 // Send LocationScouts packet
-void AP_SendLocationScouts(std::set<int64_t> const& locations, int create_as_hint);
+void AP_SendLocationScouts(set<int64_t> const& locations, int create_as_hint);
 // Receive Function for LocationInfo
 void AP_SetLocationInfoCallback(std::function<void(vector<AP_NetworkItem>)> f_locinfrecv);
 
@@ -83,7 +82,7 @@ void AP_SetLocationInfoCallback(std::function<void(vector<AP_NetworkItem>)> f_lo
 
 // Sends LocationCheck for given index
 void AP_SendItem(int64_t location);
-void AP_SendItem(std::set<int64_t> const& locations);
+void AP_SendItem(set<int64_t> const& locations);
 
 // Called when Story completed, sends StatusUpdate
 void AP_StoryComplete();
@@ -313,11 +312,11 @@ AP_RequestStatus AP_SendGift(AP_Gift gift);
 
 // Accept a gift from the Giftbox
 AP_RequestStatus AP_AcceptGift(std::string id);
-AP_RequestStatus AP_AcceptGift(std::set<std::string> ids);
+AP_RequestStatus AP_AcceptGift(set<std::string> ids);
 
 // Reject a gift from the Giftbox, and refund it.
 AP_RequestStatus AP_RejectGift(std::string id);
-AP_RequestStatus AP_RejectGift(std::set<std::string> ids);
+AP_RequestStatus AP_RejectGift(set<std::string> ids);
 
 // Automatically reject gifts if they are sent while giftbox is closed, or if they do not match a desired trait and AcceptAnyGift was set to false
 // This is mainly a "consistency checker", but could be expensive to use compared to letting the player reject gifts manually, as this will scan all incoming gifts!
