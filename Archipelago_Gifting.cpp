@@ -11,7 +11,7 @@
 #include <sys/types.h>
 #include <utility>
 #include <vector>
-#include <mutex>
+#include <atomic>
 #include "Archipelago/ArchipelagoSocket.h"
 
 // extern Json::FastWriter writer;
@@ -26,9 +26,66 @@ extern std::function<void(std::string)> logfunc;
 
 // Stuff that is only used for Gifting
 std::map<std::pair<int,std::string>,AP_GiftBoxProperties> map_players_to_giftbox;
-std::mutex map_players_to_giftbox_mutex;
+std::atomic<bool> map_players_to_giftbox_lock { false };
+constexpr s32 cMapPlayersToGiftboxLockMaxAttempts = 200;
 vector<AP_Gift> cur_gifts_available;
-std::mutex cur_gifts_available_mutex;
+std::atomic<bool> cur_gifts_available_lock { false };
+constexpr s32 cCurGiftsAvailableLockMaxAttempts = 200;
+
+class MapPlayersToGiftLock {
+    public:
+        MapPlayersToGiftLock() {
+            bool expected = false;
+            for (s32 attempts = 0; !map_players_to_giftbox_lock.compare_exchange_weak(
+                     expected, true, std::memory_order_acquire, std::memory_order_relaxed);
+                 attempts++) {
+                expected = false;
+                if (attempts >= cMapPlayersToGiftboxLockMaxAttempts)
+                    return;
+                nn::os::YieldThread();
+            }
+            mAcquired = true;
+        }
+        ~MapPlayersToGiftLock() {
+            if (mAcquired)
+                map_players_to_giftbox_lock.store(false, std::memory_order_release);
+        }
+        bool isAcquired() const { return mAcquired; }
+
+        MapPlayersToGiftLock(const MapPlayersToGiftLock&) = delete;
+        MapPlayersToGiftLock& operator=(const MapPlayersToGiftLock&) = delete;
+
+    private:
+        bool mAcquired = false;
+};
+
+class CurGiftsAvailbeLock {
+    public:
+        CurGiftsAvailbeLock() {
+            bool expected = false;
+            for (s32 attempts = 0; !cur_gifts_available_lock.compare_exchange_weak(
+                     expected, true, std::memory_order_acquire, std::memory_order_relaxed);
+                 attempts++) {
+                expected = false;
+                if (attempts >= cCurGiftsAvailableLockMaxAttempts)
+                    return;
+                nn::os::YieldThread();
+            }
+            mAcquired = true;
+        }
+        ~CurGiftsAvailbeLock() {
+            if (mAcquired)
+                cur_gifts_available_lock.store(false, std::memory_order_release);
+        }
+        bool isAcquired() const { return mAcquired; }
+
+        CurGiftsAvailbeLock(const CurGiftsAvailbeLock&) = delete;
+        CurGiftsAvailbeLock& operator=(const CurGiftsAvailbeLock&) = delete;
+
+    private:
+        bool mAcquired = false;
+    };
+
 
 // PRIV Func Declarations Start
 AP_RequestStatus sendGiftInternal(const AP_Gift& gift);
@@ -94,13 +151,13 @@ AP_RequestStatus AP_SetGiftBoxProperties(AP_GiftBoxProperties props) {
 }
 
 std::map<std::pair<int,std::string>,AP_GiftBoxProperties> AP_QueryGiftBoxes() {
-    std::scoped_lock lock(map_players_to_giftbox_mutex);
+    MapPlayersToGiftLock lock;
     return map_players_to_giftbox;
 }
 
 // Get currently available Gifts in own gift box
 vector<AP_Gift> AP_CheckGifts() {
-    std::scoped_lock lock(cur_gifts_available_mutex);
+    CurGiftsAvailbeLock lock;
     return cur_gifts_available;
 }
 
@@ -216,10 +273,12 @@ void AP_SetGiftingSupported(bool enabled){
 AP_GiftBoxProperties getLocalGiftBoxProperties(){
     std::pair<int,std::string> localGiftbox = {ap_player_team,getPlayer(ap_player_team, AP_GetPlayerID()).name};
 
-    std::scoped_lock lock(map_players_to_giftbox_mutex);
+    MapPlayersToGiftLock lock;
 
-    if (map_players_to_giftbox.count(localGiftbox) > 0)
-        return map_players_to_giftbox[localGiftbox];
+    if (lock.isAcquired()) {
+        if (map_players_to_giftbox.count(localGiftbox) > 0)
+            return map_players_to_giftbox[localGiftbox];
+    }
 
     AP_GiftBoxProperties uninitialized;
     uninitialized.IsOpen = false;
@@ -230,7 +289,10 @@ AP_GiftBoxProperties getLocalGiftBoxProperties(){
 bool hasOpenGiftBox(int team, std::string player){
     std::pair<int,std::string> giftTarget = {team, player};
 
-    std::scoped_lock lock(map_players_to_giftbox_mutex);
+    MapPlayersToGiftLock lock;
+    if (!lock.isAcquired())
+        return false;
+
     return map_players_to_giftbox.count(giftTarget) 
         && map_players_to_giftbox[giftTarget].IsOpen == true;
 }
@@ -320,41 +382,45 @@ void handleGiftAPISetReply(const AP_SetReply& reply) {
             }
         }
 
-        std::scoped_lock lock(cur_gifts_available_mutex);
-        cur_gifts_available.clear();
-        for (const std::pair<std::string, AP_Gift>& gift : gifts) {
-            cur_gifts_available.push_back(gift.second);
+        CurGiftsAvailbeLock lock;
+        if (lock.isAcquired()) {
+            cur_gifts_available.clear();
+            for (const std::pair<std::string, AP_Gift>& gift : gifts) {
+                cur_gifts_available.push_back(gift.second);
+            } 
         }
         cJSON_Delete(local_giftbox);
     } else if (reply.key.rfind("GiftBoxes;", 0) == 0) {
         int team = std::stoi(reply.key.substr(10)); //10 = length of "GiftBoxes;"
         cJSON *json_data = cJSON_ParseWithLength((*(std::string*)reply.value).c_str(), (*(std::string*)reply.value).size());
 
-        std::scoped_lock lock(map_players_to_giftbox_mutex);
-        map_players_to_giftbox.clear();
+        MapPlayersToGiftLock lock;
+        if (lock.isAcquired()) {
+            map_players_to_giftbox.clear();
 
-        cJSON *motherbox = NULL;
-        cJSON_ArrayForEach(motherbox, json_data) {
-            int slot = std::stoi(motherbox->string);
-            cJSON *player_global_props = motherbox->child;
+            cJSON *motherbox = NULL;
+            cJSON_ArrayForEach(motherbox, json_data) {
+                int slot = std::stoi(motherbox->string);
+                cJSON *player_global_props = motherbox->child;
 
-            int min_supported_version = cJSON_GetObjectItem(player_global_props, "minimum_gift_data_version")->valueint;
-            int max_supported_version = cJSON_GetObjectItem(player_global_props, "maximum_gift_data_version")->valueint;
+                int min_supported_version = cJSON_GetObjectItem(player_global_props, "minimum_gift_data_version")->valueint;
+                int max_supported_version = cJSON_GetObjectItem(player_global_props, "maximum_gift_data_version")->valueint;
 
-            if (max_supported_version < CURRENT_GIFT_PROTOCOL_VERSION || min_supported_version > CURRENT_GIFT_PROTOCOL_VERSION)
-                continue; //we cant send gifts to clients incompatiable with our version
+                if (max_supported_version < CURRENT_GIFT_PROTOCOL_VERSION || min_supported_version > CURRENT_GIFT_PROTOCOL_VERSION)
+                    continue; //we cant send gifts to clients incompatiable with our version
 
-            vector<std::string> DesiredTraits;
-            for (unsigned int i = 0; i < cJSON_GetArraySize(cJSON_GetObjectItem(player_global_props, "desired_traits")); i++) {
-                DesiredTraits.push_back(cJSON_GetArrayItem(cJSON_GetObjectItem(player_global_props, "desired_traits"), i)->valuestring);
+                vector<std::string> DesiredTraits;
+                for (unsigned int i = 0; i < cJSON_GetArraySize(cJSON_GetObjectItem(player_global_props, "desired_traits")); i++) {
+                    DesiredTraits.push_back(cJSON_GetArrayItem(cJSON_GetObjectItem(player_global_props, "desired_traits"), i)->valuestring);
+                }
+
+                AP_GiftBoxProperties properties;
+                properties.IsOpen = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "is_open"));
+                properties.AcceptsAnyGift = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "accepts_any_gift"));
+                properties.DesiredTraits = DesiredTraits;
+
+                map_players_to_giftbox[{team, getPlayer(team, slot).name}] = properties;
             }
-
-            AP_GiftBoxProperties properties;
-            properties.IsOpen = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "is_open"));
-            properties.AcceptsAnyGift = cJSON_IsTrue(cJSON_GetObjectItem(player_global_props, "accepts_any_gift"));
-            properties.DesiredTraits = DesiredTraits;
-
-            map_players_to_giftbox[{team, getPlayer(team, slot).name}] = properties;
         }
         cJSON_Delete(json_data);
     }
